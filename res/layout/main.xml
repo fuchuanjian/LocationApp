@@ -1,0 +1,20 @@
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <TextView
+        android:id="@+id/text_view"
+        android:layout_width="wrap_content"
+        android:singleLine="true"
+        android:marqueeRepeatLimit="marquee_forever"
+        android:ellipsize="marquee"
+        android:layout_height="wrap_content"
+        android:text="@string/hello_world" />
+     <com.amap.api.maps.MapView
+        android:id="@+id/map"
+        android:layout_below="@id/text_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+</RelativeLayout>
