@@ -2,10 +2,12 @@ package cn.fu.locationtest;
 
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
 import android.app.Activity;
+import android.app.Dialog;
 import android.app.ProgressDialog;
 import android.content.Intent;
 import android.graphics.Color;
@@ -13,10 +15,16 @@ import android.location.Location;
 import android.os.Bundle;
 import android.os.Message;
 import android.util.Log;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.WindowManager;
 import android.view.View.OnClickListener;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Toast;
+import cn.fu.locationtest.RouteSearchPoiDialog.OnListItemClick;
 import cn.fu.locationtest.SMSObserverHandler.SMSInfo;
 
 import com.amap.api.location.AMapLocation;
@@ -37,6 +45,11 @@ import com.amap.api.maps.model.MarkerOptions;
 import com.amap.api.maps.model.MyLocationStyle;
 import com.amap.api.maps.overlay.BusRouteOverlay;
 import com.amap.api.services.core.LatLonPoint;
+import com.amap.api.services.core.PoiItem;
+import com.amap.api.services.poisearch.PoiItemDetail;
+import com.amap.api.services.poisearch.PoiResult;
+import com.amap.api.services.poisearch.PoiSearch;
+import com.amap.api.services.poisearch.PoiSearch.OnPoiSearchListener;
 import com.amap.api.services.route.BusPath;
 import com.amap.api.services.route.BusRouteResult;
 import com.amap.api.services.route.DriveRouteResult;
@@ -47,9 +60,7 @@ import com.amap.api.services.route.RouteSearch.OnRouteSearchListener;
 import com.amap.api.services.route.RouteSearch.WalkRouteQuery;
 import com.amap.api.services.route.WalkRouteResult;
 
-public class LocationMainActivity extends Activity implements LocationSource,
-AMapLocationListener, OnMarkerClickListener, InfoWindowAdapter,
-OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickListener
+public class LocationMainActivity extends Activity implements LocationSource, AMapLocationListener, OnMarkerClickListener, InfoWindowAdapter, OnRouteSearchListener, OnInfoWindowClickListener, OnPoiSearchListener, WeakHandler.IHandler, OnClickListener
 {
 
 	private TextView mTextView;
@@ -70,28 +81,32 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 	private int drivingMode = RouteSearch.DrivingDefault;// 驾车默认模式
 	private int walkMode = RouteSearch.WalkDefault;// 步行默认模式
 
-	private String strStart = "奇虎360";
-	private String strEnd = "方恒国际";
 	private LatLonPoint startPoint = new LatLonPoint(39.983, 116.490793);// 360地址
 	private LatLonPoint endPoint = new LatLonPoint(39.989614, 116.481763);// 方恒国际中心经纬度;
-	// private PoiSearch.Query startSearchQuery;
-	// private PoiSearch.Query endSearchQuery;
+	private PoiSearch.Query startSearchQuery;
+	private PoiSearch.Query endSearchQuery;
 	private RouteSearch routeSearch;
-    private WeakHandler mHandler = new WeakHandler(this);
-	//	handleMessage 中的消息
+	private WeakHandler mHandler = new WeakHandler(this);
+	// handleMessage 中的消息
 	private int tryCnt = 0;
-	public static final int LOCATION_CHECK = 1;	
+	public static final int LOCATION_CHECK = 1;
 	public static final int LOCATION_CANCEL = 2;
 	public static final int SMS_NOTIFY = 3;
+
+	//路径搜索临时变量
+	private String routeStartStr;
+	private String routeEndStr;	
+	private LatLonPoint routeStartPoint;
+	private LatLonPoint routeEndPoint;
 	
-	//panel button
+	// panel button
 	private ImageView mLocateIV;
-	private ImageView mGotoIV;	
-	private ImageView mSMSIV;	
+	private ImageView mGotoIV;
+	private ImageView mSMSIV;
 	private ImageView mSearchIV;
-	
+
 	private SMSObserverHandler mSmsObserverHandler;
-	
+
 	@Override
 	protected void onCreate(Bundle savedInstanceState)
 	{
@@ -103,17 +118,16 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 		mMapView.onCreate(savedInstanceState);
 
 		mLocateIV = (ImageView) findViewById(R.id.location_img);
-		mGotoIV = (ImageView) findViewById(R.id.goto_img);	
-		mSMSIV = (ImageView) findViewById(R.id.sms_img);		
-		mSearchIV = (ImageView) findViewById(R.id.search_img);	
+		mGotoIV = (ImageView) findViewById(R.id.goto_img);
+		mSMSIV = (ImageView) findViewById(R.id.sms_img);
+		mSearchIV = (ImageView) findViewById(R.id.search_img);
 		initOnClickListener(mLocateIV, mGotoIV, mSMSIV, mSearchIV);
-		
+
 		routeSearch = new RouteSearch(this);
 		routeSearch.setRouteSearchListener(this);
-		
+
 		init();
 	}
-
 
 	private void init()
 	{
@@ -143,17 +157,27 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 
 	}
 
-	
 	private void refreshMarker()
 	{
-			
-		HashMap<String, SMSInfo> smsMap = mSmsObserverHandler.mSMSHashMap;
-		Iterator<Entry<String, SMSInfo>> iter = smsMap.entrySet().iterator();
-		while (iter.hasNext())
-		{
-			Map.Entry entry = (Map.Entry) iter.next();
-			SMSInfo info = (SMSInfo) entry.getValue();
-			
+
+//		HashMap<String, SMSInfo> smsMap = mSmsObserverHandler.mSMSHashMap;
+//		Iterator<Entry<String, SMSInfo>> iter = smsMap.entrySet().iterator();
+//		while (iter.hasNext())
+//		{
+//			Map.Entry entry = (Map.Entry) iter.next();
+//			SMSInfo info = (SMSInfo) entry.getValue();
+//
+//			MarkerOptions markerOption = new MarkerOptions();
+//			markerOption.position(new LatLng(info.lat, info.lng));
+//			markerOption.title(info.name).snippet(info.locate);
+//			markerOption.perspective(true);
+//			markerOption.draggable(true);
+//			markerOption.icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED));
+//			mMap.addMarker(markerOption);
+//		}
+		SMSInfo info = mSmsObserverHandler.targetSMSInfo;
+		if (info != null)
+		{			
 			MarkerOptions markerOption = new MarkerOptions();
 			markerOption.position(new LatLng(info.lat, info.lng));
 			markerOption.title(info.name).snippet(info.locate);
@@ -163,7 +187,7 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 			mMap.addMarker(markerOption);
 		}
 		
-		
+
 	}
 
 	@Override
@@ -172,32 +196,33 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 		switch (msg.what)
 		{
 		case LOCATION_CHECK:
-			if ( mMapLocation == null)
+			if (mMapLocation == null)
 			{
 				if (tryCnt < 5)
 				{
-					startLocateRequest();					
-				}else {
+					startLocateRequest();
+				} else
+				{
 					deactivate();
 				}
+			}else {
+				deactivate();
 			}
-			
+
 			break;
 
 		case LOCATION_CANCEL:
 			deactivate();
 			break;
-			
+
 		case SMS_NOTIFY:
 			refreshMarker();
 			break;
 		default:
 			break;
 		}
-		
-	}
-	
 
+	}
 
 	/** start 必须重写的方法 */
 	@Override
@@ -212,7 +237,7 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 	{
 		super.onResume();
 		if (mSmsObserverHandler == null)
-		{			
+		{
 			mSmsObserverHandler = new SMSObserverHandler(this, mHandler);
 		}
 		mSmsObserverHandler.registerContentObserver();
@@ -293,6 +318,7 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 	@Override
 	public void activate(OnLocationChangedListener listener)
 	{
+		Log.i("fu", "激活定位");
 		mListener = listener;
 		if (mLocationManager == null)
 		{
@@ -305,7 +331,6 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 	{
 		tryCnt++;
 		Log.i("fu", "开始定位");
-		ToastUtil.showToast("开始定位");
 		mLocationManager = LocationManagerProxy.getInstance(this);
 		/*
 		 * mAMapLocManager.setGpsEnable(false);
@@ -313,8 +338,9 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 		 * API定位采用GPS和网络混合定位方式
 		 * ，第一个参数是定位provider，第二个参数时间最短是5000毫秒，第三个参数距离间隔单位是米，第四个参数是定位监听者
 		 */
+		mLocationManager.setGpsEnable(false);
 		mLocationManager.requestLocationUpdates(LocationProviderProxy.AMapNetwork, 5000, 10, this);
-		mHandler.sendEmptyMessageDelayed(LOCATION_CHECK, 12000);
+//		mHandler.sendEmptyMessageDelayed(LOCATION_CHECK, 12000);
 	}
 
 	/** 停止定位时 */
@@ -324,7 +350,6 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 		mListener = null;
 		if (mLocationManager != null)
 		{
-			Log.i("fu", "停止定位");
 			mLocationManager.removeUpdates(this);
 			mLocationManager.destory();
 		}
@@ -334,17 +359,19 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 	@Override
 	public boolean onMarkerClick(Marker marker)
 	{
-//		if (marker.getPosition().latitude == mMap.getMyLocation().getLatitude() && marker.getPosition().longitude == mMap.getMyLocation().getLongitude())
-//		{
-//			Log.i("fu", "我的位置");
-//			String desc = "我的位置";
-//			Bundle bundle = mMapLocation.getExtras();
-//			if (bundle != null)
-//			{
-//				desc = bundle.getString("desc");
-//			}
-//			marker.setTitle(desc);
-//		}
+		// if (marker.getPosition().latitude ==
+		// mMap.getMyLocation().getLatitude() && marker.getPosition().longitude
+		// == mMap.getMyLocation().getLongitude())
+		// {
+		// Log.i("fu", "我的位置");
+		// String desc = "我的位置";
+		// Bundle bundle = mMapLocation.getExtras();
+		// if (bundle != null)
+		// {
+		// desc = bundle.getString("desc");
+		// }
+		// marker.setTitle(desc);
+		// }
 		if (marker.isInfoWindowShown())
 		{
 			marker.hideInfoWindow();
@@ -354,6 +381,7 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 		}
 		return false;
 	}
+
 	@Override
 	public View getInfoContents(Marker marker)
 	{
@@ -499,13 +527,19 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 		switch (v.getId())
 		{
 		case R.id.location_img:
-			
+			startLocateRequest();
 			break;
 		case R.id.goto_img:
 			if (startPoint != null && mSmsObserverHandler.targetPoint != null)
-			{				
-				searchRouteResult(startPoint, mSmsObserverHandler.targetPoint);
-			}else {
+			{
+				if (startPoint.equals(mSmsObserverHandler.targetPoint))
+				{
+					ToastUtil.showToast("距离太近了");
+				}else {
+					searchRouteResult(startPoint, mSmsObserverHandler.targetPoint);
+				}
+			} else
+			{
 				ToastUtil.showToast("终点 起点信息不完整");
 			}
 			break;
@@ -513,35 +547,38 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 			if (mMapLocation == null)
 			{
 				ToastUtil.showToast("请先定位");
-			}else {
+			} else
+			{
 				sendSMS();
 			}
 			break;
 		case R.id.search_img:
-			
+			showSearchDialog();
 			break;
 
 		default:
 			break;
 		}
-		
+
 	}
-	private void initOnClickListener(View ...views)
+
+	private void initOnClickListener(View... views)
 	{
 		for (View view : views)
 		{
 			view.setOnClickListener(this);
 		}
 	}
-	
+
 	private long lastPressTime = 0;
+
 	private void sendSMS()
 	{
 		if (lastPressTime + 1000 > System.currentTimeMillis())
 			return;
 		lastPressTime = System.currentTimeMillis();
 		Intent sharedIntent = new Intent(Intent.ACTION_SEND);
-		
+
 		Double geoLat = mMapLocation.getLatitude();
 		Double geoLng = mMapLocation.getLongitude();
 
@@ -549,132 +586,178 @@ OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickL
 		Bundle locBundle = mMapLocation.getExtras();
 		if (locBundle != null)
 		{
-			desc = "\""+locBundle.getString("desc")+"\"";
+			desc = "\"" + locBundle.getString("desc") + "\"";
 		}
-		
+
 		StringBuffer sb = new StringBuffer();
 		sb.append("我在 ").append(desc).append(" 经纬度(").append(geoLat).append(",").append(geoLng).append(")");
-        sharedIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        sharedIntent.setType("text/plain");
-        sharedIntent.putExtra("sms_body", sb.toString());
-        sharedIntent.putExtra(Intent.EXTRA_SUBJECT,"发送我的位置");
-        sharedIntent.putExtra(Intent.EXTRA_TEXT, sb.toString());
-        startActivity(Intent.createChooser(sharedIntent, "发送我的位置"));
+		sharedIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+		sharedIntent.setType("text/plain");
+		sharedIntent.putExtra("sms_body", sb.toString());
+		sharedIntent.putExtra(Intent.EXTRA_SUBJECT, "发送我的位置");
+		sharedIntent.putExtra(Intent.EXTRA_TEXT, sb.toString());
+		startActivity(Intent.createChooser(sharedIntent, "发送我的位置"));
 	}
 
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	// /**
-	// * 查询路径规划起点
-	// */
-	// public void startSearchResult()
-	// {
-	// showProgressDialog();
-	// startSearchQuery = new PoiSearch.Query(strStart, "", "010"); //
-	// 第一个参数表示查询关键字，第二参数表示poi搜索类型，第三个参数表示城市区号或者城市名
-	// startSearchQuery.setPageNum(0);// 设置查询第几页，第一页从0开始
-	// startSearchQuery.setPageSize(20);// 设置每页返回多少条数据
-	// PoiSearch poiSearch = new PoiSearch(this, startSearchQuery);
-	// poiSearch.setOnPoiSearchListener(this);
-	// poiSearch.searchPOIAsyn();// 异步poi查询
-	// }
-	// /**
-	// * 查询路径规划终点
-	// */
-	// public void endSearchResult() {
-	// if (endPoint != null && strEnd.equals("地图上的终点")) {
-	// searchRouteResult(startPoint, endPoint);
-	// } else {
-	// showProgressDialog();
-	// endSearchQuery = new PoiSearch.Query(strEnd, "", "010"); //
-	// 第一个参数表示查询关键字，第二参数表示poi搜索类型，第三个参数表示城市区号或者城市名
-	// endSearchQuery.setPageNum(0);// 设置查询第几页，第一页从0开始
-	// endSearchQuery.setPageSize(20);// 设置每页返回多少条数据
-	//
-	// PoiSearch poiSearch = new PoiSearch(this,
-	// endSearchQuery);
-	// poiSearch.setOnPoiSearchListener(this);
-	// poiSearch.searchPOIAsyn(); // 异步poi查询
-	// }
-	// }
-	// /**
-	// * POI搜索结果回调
-	// */
-	// @Override
-	// public void onPoiSearched(PoiResult result, int rCode)
-	// {
-	// dissmissProgressDialog();
-	// if (rCode == 0)
-	// {// 返回成功
-	// if (result != null && result.getQuery() != null && result.getPois() !=
-	// null && result.getPois().size() > 0)
-	// {// 搜索poi的结果
-	// if (result.getQuery().equals(startSearchQuery))
-	// {
-	// List<PoiItem> poiItems = result.getPois();// 取得poiitem数据
-	// RouteSearchPoiDialog dialog = new RouteSearchPoiDialog(this, poiItems);
-	// dialog.setTitle("您要找的起点是:");
-	// dialog.show();
-	// dialog.setOnListClickListener(new OnListItemClick()
-	// {
-	// @Override
-	// public void onListItemClick(RouteSearchPoiDialog dialog, PoiItem
-	// startpoiItem)
-	// {
-	// startPoint = startpoiItem.getLatLonPoint();
-	// strStart = startpoiItem.getTitle();
-	// endSearchResult();// 开始搜终点
-	// }
-	//
-	// });
-	// } else if (result.getQuery().equals(endSearchQuery))
-	// {
-	// List<PoiItem> poiItems = result.getPois();// 取得poiitem数据
-	// RouteSearchPoiDialog dialog = new RouteSearchPoiDialog(this, poiItems);
-	// dialog.setTitle("您要找的终点是:");
-	// dialog.show();
-	// dialog.setOnListClickListener(new OnListItemClick()
-	// {
-	// @Override
-	// public void onListItemClick(RouteSearchPoiDialog dialog, PoiItem
-	// endpoiItem)
-	// {
-	// endPoint = endpoiItem.getLatLonPoint();
-	// strEnd = endpoiItem.getTitle();
-	// searchRouteResult(startPoint, endPoint);// 进行路径规划搜索
-	// }
-	//
-	// });
-	// }
-	// } else
-	// {
-	// Toast.makeText(this, "没有结果", 0).show();
-	// }
-	// } else if (rCode == 27)
-	// {
-	// Toast.makeText(this, "没有网络", 0).show();
-	// } else if (rCode == 32)
-	// {
-	// Toast.makeText(this, "鉴权错误", 0).show();
-	// } else
-	// {
-	// Toast.makeText(this, "错误", 0).show();
-	// }
-	//
-	// }
+	// 搜索对话框
+	private Dialog mSearchDialog = null;
+
+	private void showSearchDialog()
+	{
+		if (mSearchDialog != null && mSearchDialog.isShowing())
+		{
+			return;
+		}
+		
+		if (mSearchDialog == null)
+		{
+			 View view = LayoutInflater.from(this).inflate(R.layout.search_layout, null, false);
+			 mSearchDialog = new Dialog(this, R.style.shareDialog);
+			 mSearchDialog.setContentView(view);
+			 mSearchDialog.setCanceledOnTouchOutside(true);
+			 WindowManager.LayoutParams lp = mSearchDialog.getWindow().getAttributes();
+			 lp.width = MyApplication.getContext().getResources().getDisplayMetrics().widthPixels;
+			 mSearchDialog.getWindow().setAttributes(lp);
+			 
+			 
+			 final EditText startET = (EditText) view.findViewById(R.id.start_text);
+			 final EditText endET = (EditText) view.findViewById(R.id.end_text);
+			 Button button = (Button) view.findViewById(R.id.btn);
+			 
+			 button.setOnClickListener(new OnClickListener()
+			{
+				@Override
+				public void onClick(View v)
+				{
+					String start = startET.getText().toString().trim();
+					String end = endET.getText().toString().trim();
+					if (start == null || start.length() == 0)
+					{
+						ToastUtil.showToast("请输入起点");
+						return;
+					}
+					if (end == null || end.length() == 0)
+					{
+						ToastUtil.showToast("请输入终点");
+					}
+					if (start.equals(end))
+					{
+						ToastUtil.showToast("同一地点");
+					}
+					routeStartStr = start;
+					routeEndStr = end;
+					queryStartPointInfo();
+					mSearchDialog.dismiss();
+				}
+			});
+			 
+		}
+		mSearchDialog.show();
+		
+	}
+
+	/**
+	 * 查询路径规划起点
+	 */
+	public void queryStartPointInfo()
+	{
+		showProgressDialog();
+		startSearchQuery = new PoiSearch.Query(routeStartStr, "", "010"); //
+		// 第一个参数表示查询关键字，第二参数表示poi搜索类型，第三个参数表示城市区号或者城市名
+		startSearchQuery.setPageNum(0);// 设置查询第几页，第一页从0开始
+		startSearchQuery.setPageSize(20);// 设置每页返回多少条数据
+		PoiSearch poiSearch = new PoiSearch(this, startSearchQuery);
+		poiSearch.setOnPoiSearchListener(this);
+		poiSearch.searchPOIAsyn();// 异步poi查询
+	}
+
+	/**
+	 * 查询路径规划终点
+	 */
+	public void queryEndPointInfo()
+	{
+		if (routeEndPoint != null)
+		{
+			searchRouteResult(routeStartPoint, routeEndPoint);
+		} else
+		{
+			showProgressDialog();
+			endSearchQuery = new PoiSearch.Query(routeEndStr, "", "010"); //
+			// 第一个参数表示查询关键字，第二参数表示poi搜索类型，第三个参数表示城市区号或者城市名
+			endSearchQuery.setPageNum(0);// 设置查询第几页，第一页从0开始
+			endSearchQuery.setPageSize(20);// 设置每页返回多少条数据
+
+			PoiSearch poiSearch = new PoiSearch(this, endSearchQuery);
+			poiSearch.setOnPoiSearchListener(this);
+			poiSearch.searchPOIAsyn(); // 异步poi查询
+		}
+	}
+
+	/**
+	 * POI搜索结果回调
+	 */
+	@Override
+	public void onPoiSearched(PoiResult result, int rCode)
+	{
+		dissmissProgressDialog();
+		if (rCode == 0)
+		{// 返回成功
+			if (result != null && result.getQuery() != null && result.getPois() != null && result.getPois().size() > 0)
+			{// 搜索poi的结果
+				if (result.getQuery().equals(startSearchQuery))
+				{
+					List<PoiItem> poiItems = result.getPois();// 取得poiitem数据
+					RouteSearchPoiDialog dialog = new RouteSearchPoiDialog(this, poiItems);
+					dialog.setTitle("您要找的起点是:");
+					dialog.show();
+					dialog.setOnListClickListener(new OnListItemClick()
+					{
+						@Override
+						public void onListItemClick(RouteSearchPoiDialog dialog, PoiItem startpoiItem)
+						{
+							routeStartPoint = startpoiItem.getLatLonPoint();
+							queryEndPointInfo();// 开始搜终点
+						}
+
+					});
+				} else if (result.getQuery().equals(endSearchQuery))
+				{
+					List<PoiItem> poiItems = result.getPois();// 取得poiitem数据
+					RouteSearchPoiDialog dialog = new RouteSearchPoiDialog(this, poiItems);
+					dialog.setTitle("您要找的终点是:");
+					dialog.show();
+					dialog.setOnListClickListener(new OnListItemClick()
+					{
+						@Override
+						public void onListItemClick(RouteSearchPoiDialog dialog, PoiItem endpoiItem)
+						{
+							routeEndPoint = endpoiItem.getLatLonPoint();
+							searchRouteResult(routeStartPoint, routeEndPoint);// 进行路径规划搜索
+						}
+
+					});
+				}
+			} else
+			{
+				Toast.makeText(this, "没有结果", 0).show();
+			}
+		} else if (rCode == 27)
+		{
+			Toast.makeText(this, "没有网络", 0).show();
+		} else if (rCode == 32)
+		{
+			Toast.makeText(this, "鉴权错误", 0).show();
+		} else
+		{
+			Toast.makeText(this, "错误", 0).show();
+		}
+
+	}
+
+	@Override
+	public void onPoiItemDetailSearched(PoiItemDetail arg0, int arg1)
+	{
+		// TODO Auto-generated method stub
+		
+	}
 }

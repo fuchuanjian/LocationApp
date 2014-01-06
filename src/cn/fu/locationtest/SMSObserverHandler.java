@@ -5,6 +5,8 @@ import java.util.concurrent.Semaphore;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import cn.fu.locationtest.SMSObserverHandler.SMSInfo;
+
 import com.amap.api.services.core.LatLonPoint;
 
 import android.content.Context;
@@ -21,7 +23,8 @@ public class SMSObserverHandler
 	private Context mContext;
 	private Handler mHandler;
 	private SMSContentObserver msmsoContentObserver;
-	private final Uri SMS_Uri = Uri.parse("content://sms/inbox");
+	private final Uri SMS_Uri = Uri.parse("content://sms");
+//	private final Uri SMS_Uri = Uri.parse("content://sms/inbox");
 	private static final String[] PROJECTION = new String[]
 	{ "_id", "address", "person", "body", "date", "type" };
 	public HashMap<String, SMSInfo> mSMSHashMap = new HashMap<String, SMSInfo>();
@@ -30,6 +33,7 @@ public class SMSObserverHandler
 	private Pattern patternLocate = Pattern.compile("\".+\"");
 	final Semaphore sp = new Semaphore(1);
 	public LatLonPoint targetPoint = null;
+	public SMSInfo targetSMSInfo;
 	private long maxTime = 0;
 	
 	public SMSObserverHandler(Context context, Handler handler)
@@ -82,11 +86,6 @@ public class SMSObserverHandler
 							String locate = null;
 							Matcher locateMatcher = patternLocate.matcher(body);
 							
-							if (date > maxTime)
-							{
-								maxTime = date;
-								targetPoint = new LatLonPoint(lat, lng);
-							}
 							
 							if (locateMatcher.find())
 							{
@@ -106,11 +105,17 @@ public class SMSObserverHandler
 								SMSInfo info = new SMSInfo(name, locate, lat, lng, date);
 								mSMSHashMap.put(name, info);
 							}
+							if (date > maxTime)
+							{
+								maxTime = date;
+								targetPoint = new LatLonPoint(lat, lng);
+								targetSMSInfo = mSMSHashMap.get(name);
+							}
 						}
 					}
 					cursor.close();
 					
-					if (mHandler != null)
+					if (mHandler != null && mSMSHashMap!= null && mSMSHashMap.size() > 0)
 					{
 						mHandler.sendEmptyMessage(LocationMainActivity.SMS_NOTIFY);
 					}
