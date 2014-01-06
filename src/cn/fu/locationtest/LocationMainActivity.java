@@ -1,14 +1,23 @@
 package cn.fu.locationtest;
 
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Map.Entry;
+
 import android.app.Activity;
 import android.app.ProgressDialog;
+import android.content.Intent;
 import android.graphics.Color;
 import android.location.Location;
 import android.os.Bundle;
+import android.os.Message;
 import android.util.Log;
 import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.ImageView;
 import android.widget.TextView;
-import android.widget.Toast;
+import cn.fu.locationtest.SMSObserverHandler.SMSInfo;
 
 import com.amap.api.location.AMapLocation;
 import com.amap.api.location.AMapLocationListener;
@@ -22,6 +31,7 @@ import com.amap.api.maps.LocationSource;
 import com.amap.api.maps.MapView;
 import com.amap.api.maps.UiSettings;
 import com.amap.api.maps.model.BitmapDescriptorFactory;
+import com.amap.api.maps.model.LatLng;
 import com.amap.api.maps.model.Marker;
 import com.amap.api.maps.model.MarkerOptions;
 import com.amap.api.maps.model.MyLocationStyle;
@@ -37,13 +47,14 @@ import com.amap.api.services.route.RouteSearch.OnRouteSearchListener;
 import com.amap.api.services.route.RouteSearch.WalkRouteQuery;
 import com.amap.api.services.route.WalkRouteResult;
 
-public class LocationMainActivity extends Activity implements LocationSource, AMapLocationListener, OnMarkerClickListener, InfoWindowAdapter, OnRouteSearchListener, OnInfoWindowClickListener
+public class LocationMainActivity extends Activity implements LocationSource,
+AMapLocationListener, OnMarkerClickListener, InfoWindowAdapter,
+OnRouteSearchListener, OnInfoWindowClickListener, WeakHandler.IHandler, OnClickListener
 {
 
 	private TextView mTextView;
 	private MapView mMapView;
 	private AMap mMap;
-	private Marker targetMarker;
 	private AMapLocation mMapLocation;
 
 	private LocationManagerProxy mLocationManager;
@@ -62,12 +73,25 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 	private String strStart = "奇虎360";
 	private String strEnd = "方恒国际";
 	private LatLonPoint startPoint = new LatLonPoint(39.983, 116.490793);// 360地址
-																			// ;
 	private LatLonPoint endPoint = new LatLonPoint(39.989614, 116.481763);// 方恒国际中心经纬度;
 	// private PoiSearch.Query startSearchQuery;
 	// private PoiSearch.Query endSearchQuery;
 	private RouteSearch routeSearch;
-
+    private WeakHandler mHandler = new WeakHandler(this);
+	//	handleMessage 中的消息
+	private int tryCnt = 0;
+	public static final int LOCATION_CHECK = 1;	
+	public static final int LOCATION_CANCEL = 2;
+	public static final int SMS_NOTIFY = 3;
+	
+	//panel button
+	private ImageView mLocateIV;
+	private ImageView mGotoIV;	
+	private ImageView mSMSIV;	
+	private ImageView mSearchIV;
+	
+	private SMSObserverHandler mSmsObserverHandler;
+	
 	@Override
 	protected void onCreate(Bundle savedInstanceState)
 	{
@@ -78,10 +102,18 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 		mMapView = (MapView) findViewById(R.id.map);
 		mMapView.onCreate(savedInstanceState);
 
+		mLocateIV = (ImageView) findViewById(R.id.location_img);
+		mGotoIV = (ImageView) findViewById(R.id.goto_img);	
+		mSMSIV = (ImageView) findViewById(R.id.sms_img);		
+		mSearchIV = (ImageView) findViewById(R.id.search_img);	
+		initOnClickListener(mLocateIV, mGotoIV, mSMSIV, mSearchIV);
+		
 		routeSearch = new RouteSearch(this);
 		routeSearch.setRouteSearchListener(this);
+		
 		init();
 	}
+
 
 	private void init()
 	{
@@ -107,21 +139,65 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 			mMap.setOnMarkerClickListener(this);
 			mMap.setInfoWindowAdapter(this);// 设置自定义InfoWindow样式
 			mMap.setOnInfoWindowClickListener(this);
-			addMarkersToMap();
 		}
 
 	}
 
-	private void addMarkersToMap()
+	
+	private void refreshMarker()
 	{
-		MarkerOptions markerOption = new MarkerOptions();
-		markerOption.position(Constants.FANGHENG);
-		markerOption.title("方恒国际").snippet("我这这里方恒国际");
-		markerOption.perspective(true);
-		markerOption.draggable(true);
-		markerOption.icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE));
-		targetMarker = mMap.addMarker(markerOption);
+			
+		HashMap<String, SMSInfo> smsMap = mSmsObserverHandler.mSMSHashMap;
+		Iterator<Entry<String, SMSInfo>> iter = smsMap.entrySet().iterator();
+		while (iter.hasNext())
+		{
+			Map.Entry entry = (Map.Entry) iter.next();
+			SMSInfo info = (SMSInfo) entry.getValue();
+			
+			MarkerOptions markerOption = new MarkerOptions();
+			markerOption.position(new LatLng(info.lat, info.lng));
+			markerOption.title(info.name).snippet(info.locate);
+			markerOption.perspective(true);
+			markerOption.draggable(true);
+			markerOption.icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED));
+			mMap.addMarker(markerOption);
+		}
+		
+		
 	}
+
+	@Override
+	public void handleMessage(Message msg)
+	{
+		switch (msg.what)
+		{
+		case LOCATION_CHECK:
+			if ( mMapLocation == null)
+			{
+				if (tryCnt < 5)
+				{
+					startLocateRequest();					
+				}else {
+					deactivate();
+				}
+			}
+			
+			break;
+
+		case LOCATION_CANCEL:
+			deactivate();
+			break;
+			
+		case SMS_NOTIFY:
+			refreshMarker();
+			break;
+		default:
+			break;
+		}
+		
+	}
+	
+
 
 	/** start 必须重写的方法 */
 	@Override
@@ -135,6 +211,11 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 	protected void onResume()
 	{
 		super.onResume();
+		if (mSmsObserverHandler == null)
+		{			
+			mSmsObserverHandler = new SMSObserverHandler(this, mHandler);
+		}
+		mSmsObserverHandler.registerContentObserver();
 		mMapView.onResume();
 	}
 
@@ -142,6 +223,10 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 	protected void onPause()
 	{
 		super.onPause();
+		if (mSmsObserverHandler != null)
+		{
+			mSmsObserverHandler.unregisterContentObserver();
+		}
 		mMapView.onPause();
 		deactivate();
 	}
@@ -151,6 +236,7 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 	{
 		super.onDestroy();
 		mMapView.onDestroy();
+		deactivate();
 	}
 
 	/** end 必须重写的方法 */
@@ -186,7 +272,7 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 			mMapLocation = location;
 			Double geoLat = location.getLatitude();
 			Double geoLng = location.getLongitude();
-
+			startPoint = new LatLonPoint(geoLat, geoLng);
 			String desc = "";
 			Bundle locBundle = location.getExtras();
 			if (locBundle != null)
@@ -210,16 +296,25 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 		mListener = listener;
 		if (mLocationManager == null)
 		{
-			mLocationManager = LocationManagerProxy.getInstance(this);
-			/*
-			 * mAMapLocManager.setGpsEnable(false);
-			 * 1.0.2版本新增方法，设置true表示混合定位中包含gps定位，false表示纯网络定位，默认是true Location
-			 * API定位采用GPS和网络混合定位方式
-			 * ，第一个参数是定位provider，第二个参数时间最短是5000毫秒，第三个参数距离间隔单位是米，第四个参数是定位监听者
-			 */
-			mLocationManager.requestLocationUpdates(LocationProviderProxy.AMapNetwork, 5000, 10, this);
+			startLocateRequest();
 		}
 
+	}
+
+	private void startLocateRequest()
+	{
+		tryCnt++;
+		Log.i("fu", "开始定位");
+		ToastUtil.showToast("开始定位");
+		mLocationManager = LocationManagerProxy.getInstance(this);
+		/*
+		 * mAMapLocManager.setGpsEnable(false);
+		 * 1.0.2版本新增方法，设置true表示混合定位中包含gps定位，false表示纯网络定位，默认是true Location
+		 * API定位采用GPS和网络混合定位方式
+		 * ，第一个参数是定位provider，第二个参数时间最短是5000毫秒，第三个参数距离间隔单位是米，第四个参数是定位监听者
+		 */
+		mLocationManager.requestLocationUpdates(LocationProviderProxy.AMapNetwork, 5000, 10, this);
+		mHandler.sendEmptyMessageDelayed(LOCATION_CHECK, 12000);
 	}
 
 	/** 停止定位时 */
@@ -229,6 +324,7 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 		mListener = null;
 		if (mLocationManager != null)
 		{
+			Log.i("fu", "停止定位");
 			mLocationManager.removeUpdates(this);
 			mLocationManager.destory();
 		}
@@ -238,17 +334,17 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 	@Override
 	public boolean onMarkerClick(Marker marker)
 	{
-		if (marker.getPosition().latitude == mMap.getMyLocation().getLatitude() && marker.getPosition().longitude == mMap.getMyLocation().getLongitude())
-		{
-			Log.i("fu", "我的位置");
-			String desc = "我的位置";
-			Bundle bundle = mMapLocation.getExtras();
-			if (bundle != null)
-			{
-				desc = bundle.getString("desc");
-			}
-			marker.setTitle(desc);
-		}
+//		if (marker.getPosition().latitude == mMap.getMyLocation().getLatitude() && marker.getPosition().longitude == mMap.getMyLocation().getLongitude())
+//		{
+//			Log.i("fu", "我的位置");
+//			String desc = "我的位置";
+//			Bundle bundle = mMapLocation.getExtras();
+//			if (bundle != null)
+//			{
+//				desc = bundle.getString("desc");
+//			}
+//			marker.setTitle(desc);
+//		}
 		if (marker.isInfoWindowShown())
 		{
 			marker.hideInfoWindow();
@@ -334,17 +430,17 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 				routeOverlay.zoomToSpan();
 			} else
 			{
-				Toast.makeText(this, "没有结果", 0).show();
+				ToastUtil.showToast("没有结果");
 			}
 		} else if (rCode == 27)
 		{
-			Toast.makeText(this, "无网络", 0).show();
+			ToastUtil.showToast("无网络");
 		} else if (rCode == 32)
 		{
-			Toast.makeText(this, "鉴权出现错误", 0).show();
+			ToastUtil.showToast("鉴权出现错误");
 		} else
 		{
-			Toast.makeText(this, "错误", 0).show();
+			ToastUtil.showToast("错误");
 		}
 
 	}
@@ -395,12 +491,77 @@ public class LocationMainActivity extends Activity implements LocationSource, AM
 	@Override
 	public void onInfoWindowClick(Marker marker)
 	{
-		if (marker.equals(targetMarker))
+	}
+
+	@Override
+	public void onClick(View v)
+	{
+		switch (v.getId())
 		{
-			// startSearchResult();// 开始搜终点
-//			searchRouteResult(startPoint, endPoint);// 进行路径规划搜索
+		case R.id.location_img:
+			
+			break;
+		case R.id.goto_img:
+			if (startPoint != null && mSmsObserverHandler.targetPoint != null)
+			{				
+				searchRouteResult(startPoint, mSmsObserverHandler.targetPoint);
+			}else {
+				ToastUtil.showToast("终点 起点信息不完整");
+			}
+			break;
+		case R.id.sms_img:
+			if (mMapLocation == null)
+			{
+				ToastUtil.showToast("请先定位");
+			}else {
+				sendSMS();
+			}
+			break;
+		case R.id.search_img:
+			
+			break;
+
+		default:
+			break;
+		}
+		
+	}
+	private void initOnClickListener(View ...views)
+	{
+		for (View view : views)
+		{
+			view.setOnClickListener(this);
 		}
 	}
+	
+	private long lastPressTime = 0;
+	private void sendSMS()
+	{
+		if (lastPressTime + 1000 > System.currentTimeMillis())
+			return;
+		lastPressTime = System.currentTimeMillis();
+		Intent sharedIntent = new Intent(Intent.ACTION_SEND);
+		
+		Double geoLat = mMapLocation.getLatitude();
+		Double geoLng = mMapLocation.getLongitude();
+
+		String desc = "";
+		Bundle locBundle = mMapLocation.getExtras();
+		if (locBundle != null)
+		{
+			desc = "\""+locBundle.getString("desc")+"\"";
+		}
+		
+		StringBuffer sb = new StringBuffer();
+		sb.append("我在 ").append(desc).append(" 经纬度(").append(geoLat).append(",").append(geoLng).append(")");
+        sharedIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        sharedIntent.setType("text/plain");
+        sharedIntent.putExtra("sms_body", sb.toString());
+        sharedIntent.putExtra(Intent.EXTRA_SUBJECT,"发送我的位置");
+        sharedIntent.putExtra(Intent.EXTRA_TEXT, sb.toString());
+        startActivity(Intent.createChooser(sharedIntent, "发送我的位置"));
+	}
+
 	
 	
 	

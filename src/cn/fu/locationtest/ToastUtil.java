@@ -1,5 +1,6 @@
 package cn.fu.locationtest;
 
+import android.util.Log;
 import android.widget.Toast;
 
 public class ToastUtil
@@ -16,6 +17,7 @@ public class ToastUtil
             toast.show();
         } catch (Exception e) {
             // TODO: handle exception
+        	Log.i("fu", "出错了 "+e);
         }
     }
     

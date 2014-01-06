@@ -1,20 +1,56 @@
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent" >
 
     <TextView
         android:id="@+id/text_view"
         android:layout_width="wrap_content"
-        android:singleLine="true"
-        android:marqueeRepeatLimit="marquee_forever"
-        android:ellipsize="marquee"
         android:layout_height="wrap_content"
+        android:ellipsize="marquee"
+        android:marqueeRepeatLimit="marquee_forever"
+        android:singleLine="true"
         android:text="@string/hello_world" />
-     <com.amap.api.maps.MapView
-        android:id="@+id/map"
-        android:layout_below="@id/text_view"
+
+    <LinearLayout
+        android:id="@+id/panel_layout"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="50dp"
+        android:layout_alignParentBottom="true"
+        android:background="@drawable/bottom_panel_bg"
+        android:orientation="horizontal" >
+
+        <ImageView
+            android:id="@+id/location_img"
+            android:layout_width="match_parent" 
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:src="@drawable/icon_locate"/>
+        <ImageView
+            android:id="@+id/goto_img"
+            android:layout_weight="1"
+            android:layout_width="match_parent" 
+            android:layout_height="match_parent"
+            android:src="@drawable/icon_goto"/>
+        <ImageView
+            android:id="@+id/sms_img"
+            android:layout_weight="1"
+            android:layout_width="match_parent" 
+            android:layout_height="match_parent"
+            android:src="@drawable/icon_sms"/>
+        <ImageView
+            android:id="@+id/search_img"
+            android:layout_weight="1"
+            android:layout_width="match_parent" 
+            android:layout_height="match_parent"
+            android:src="@drawable/icon_search"/>
+    </LinearLayout>
+
+    <com.amap.api.maps.MapView
+        android:id="@+id/map"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_below="@id/text_view" 
+        android:layout_above="@id/panel_layout"/>
 
 </RelativeLayout>
